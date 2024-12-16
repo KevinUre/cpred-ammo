@@ -1,11 +1,6 @@
-function sampleFunc() {
-    return {
-        foo: 'foo',
-        bar: 'bar'
-    }
+function sampleFunc({foo='foo', bar='bar',baz='baz'} = {}) {
+  console.log(`${foo} ${bar} ${baz}`)
 }
 
-const {foo, bar: baz} = sampleFunc();
-console.log(foo)
-// console.log(bar)
-console.log(baz)
+sampleFunc();
+sampleFunc({bar: 'poo'});

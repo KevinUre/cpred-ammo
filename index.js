@@ -17,11 +17,11 @@ function rollToHit() {
   return firstroll
 }
 
-function rollDamage(dice) {
+function rollDamage(dice, diceSize=6) {
   let sum = 0;
   let sixCount = 0;
   for (let i = 0; i < dice; i++) {
-    const die = Math.floor(Math.random()*6)+1
+    const die = Math.floor(Math.random()*diceSize)+1
     if (die == 6)
       sixCount += 1
     sum += die
@@ -64,7 +64,7 @@ function armorPiercingTest(dice) {
   }
 }
 
-function statify(data, averageLabel, stddevLabel) {
+function statify(data, averageLabel, stddevLabel, stddev = true) {
   const average = mathjs.sum(data) / NUM_TRAILS
   const stdDev = mathjs.std(data,'uncorrected')
   const withoutOutliers = data.filter((n)=>{
@@ -78,7 +78,10 @@ function statify(data, averageLabel, stddevLabel) {
   const results = {}
   results[averageLabel] = adjustedAverage
   results[stddevLabel] = stdDev
-  return results
+  if (stddev) {
+    return results
+  }
+  return Math.round(adjustedAverage*100)/100
 }
 
 function basicHitsToKill(dice) {
@@ -102,19 +105,38 @@ function basicHitsToKill(dice) {
   return basicResults
 }
 
-function autofireTurnsToKill(modifier,dv) {
+function autofireTurnsToKill(modifier,dv, maxAmmo, {maxAutoMod = 4, guaranteedMultiplier = 0, turnsToReload = 1, rollAllDice = false, dieSize = 6, diceAmount = 2}={}) {
   const results = []
   for(let i = 0; i < NUM_TRAILS; i++) { 
     let armor = ENEMY_ARMOR
     let hp = ENEMY_HP
+    let ammo = maxAmmo
     let rollCount = 0
     while( hp > 0 ) {
-      const hitRoll = rollToHit()
       rollCount += 1
+      if(ammo < 10) { 
+        ammo = maxAmmo;
+        if(turnsToReload > 1) {
+          rollCount += turnsToReload - 1
+        } 
+        continue 
+      } 
+      else { ammo -= 10 }
+      const hitRoll = rollToHit()
       if ( hitRoll + modifier > dv ) {
-        const multi = Math.min(hitRoll + modifier - dv,4)
-        let {roll: damageRoll,crit} = rollDamage(2)
-        damageRoll *= multi
+        const multi = Math.min(hitRoll + modifier - dv + guaranteedMultiplier,maxAutoMod)
+        let damageRoll
+        let crit
+        if (rollAllDice == true) {
+          let {roll: d,c} = rollDamage(diceAmount*multi,dieSize)
+          damageRoll = d
+          crit = c
+        } else {
+          let {roll: d,c} = rollDamage(diceAmount,dieSize)
+          d *= multi
+          damageRoll = d
+          crit = c
+        }
         if (damageRoll > armor) {
           hp -= damageRoll - armor
           armor -= 1
@@ -128,17 +150,20 @@ function autofireTurnsToKill(modifier,dv) {
   return results
 }
 
-function basicTurnsToKill(dice, modifier, dv, rof) {
+function basicTurnsToKill(dice, modifier, dv, maxAmmo, rof) {
   const rateOfFire = rof ?? 1
   // turn to kill
   const results = []
   for(let i = 0; i < NUM_TRAILS; i++) { 
     let armor = ENEMY_ARMOR
     let hp = ENEMY_HP
+    let ammo = maxAmmo
     let rollCount = 0
     while( hp > 0 ) {
+      if(ammo < rateOfFire) { ammo = maxAmmo; continue; } 
       for (let s = 0; s < rateOfFire; s++)
       {
+        ammo -= 1
         const hitRoll = rollToHit()
         if ( hitRoll + modifier > dv ) {
           const {roll: damageRoll,crit} = rollDamage(dice)
@@ -473,35 +498,137 @@ rifleRangeDVs = {
   '7-12m': 16,
   '13-25m': 15,
   '26-50m': 13,
+  '51-100m': 15,
 }
-
 autofireRangeDVs = {
   '0-6m': 22,
   '7-12m': 20,
   '13-25m': 17,
   '26-50m': 20,
+  '51-100m': 25,
 }
 
-function kerberosTest(modifier,range) {
-  const basicResults = basicTurnsToKill(5,modifier,rifleRangeDVs[range])
-  const autofireResults = autofireTurnsToKill(modifier,autofireRangeDVs[range])
-  const kerberosResults = basicTurnsToKill(4,modifier,rifleRangeDVs[range],2)
-  const nonexcelKerberosResults = basicTurnsToKill(4,modifier-1,rifleRangeDVs[range],2)
-  const basicStats = statify(basicResults, 'Turns to Kill', 'Standard Deviation')
-  const kerberosStats = statify(kerberosResults, 'Turns to Kill', 'Standard Deviation')
-  const nonexcelKerberosStats = statify(nonexcelKerberosResults, 'Turns to Kill', 'Standard Deviation')
-  const autofireStats = statify(autofireResults, 'Turns to Kill', 'Standard Deviation')
+customAutofireRangeDVs = {
+  '0-6m': 18,
+  '7-12m': 17,
+  '13-25m': 17,
+  '26-50m': 17,
+  '51-100m': 20,
+}
+
+rifleAutofireRangeDVs = {
+  '0-6m': 20,
+  '7-12m': 18,
+  '13-25m': 19,
+  '26-50m': 20,
+  '51-100m': 22,
+}
+
+smgAutofireRangeDVs = {
+  '0-6m': 19,
+  '7-12m': 17,
+  '13-25m': 19,
+  '26-50m': 22,
+  '51-100m': 25,
+}
+
+smgRangeDVs = {
+  '0-6m': 15,
+  '7-12m': 13,
+  '13-25m': 15,
+  '26-50m': 20,
+  '51-100m': 25,
+}
+
+
+kerberosRangeDVs = {
+  '0-6m': 22,
+  '7-12m': 18,
+  '13-25m': 18,
+  '26-50m': 19,
+  '51-100m': 21,
+}
+
+function kerberosTest(modifier,range, guarantee = undefined) {
+  const basicResults = basicTurnsToKill(5,modifier+2,rifleRangeDVs[range],25)
+  // const autofireResults = autofireTurnsToKill(modifier,autofireRangeDVs[range],25)
+  // const autofireExtendedMagResults = autofireTurnsToKill(modifier,autofireRangeDVs[range],35)
+  // const autofireDrumMagResults = autofireTurnsToKill(modifier,autofireRangeDVs[range],45)
+  const GeminiResults = basicTurnsToKill(4,modifier+2,rifleRangeDVs[range],20,2)
+  // const nonexcelKerberosResults = basicTurnsToKill(4,modifier,rifleRangeDVs[range],20,2)
+  // const autofireAllDiceResults = []
+  // const autofireRegularRangeResults = autofireTurnsToKill(modifier,rifleRangeDVs[range],25)
+  // const autofireBothResults = []
+  // const autofireCustomRangeTableResults = autofireTurnsToKill(modifier,customAutofireRangeDVs[range],25)
+  // const autofireCustomRangeTableExtendedMagResults = autofireTurnsToKill(modifier,customAutofireRangeDVs[range],35)
+  // const autofireCustomRangeTableDrumMagResults = autofireTurnsToKill(modifier,customAutofireRangeDVs[range],45)
+  const autofireGuaranteeDrumMagResults = autofireTurnsToKill(modifier+2,rifleAutofireRangeDVs[range],45,{guaranteedMultiplier: guarantee ? guarantee : Math.floor((modifier-8)/3)})
+  // const autofireCustomRangeTableGuaranteeDrumMagResults = autofireTurnsToKill(modifier,customAutofireRangeDVs2[range],45,guarantee ? guarantee : Math.floor((modifier-8)/3))
+  // const autofireCustomRangeTableGuaranteeResults = autofireTurnsToKill(modifier,customAutofireRangeDVs2[range],25,guarantee ? guarantee : Math.floor((modifier-8)/3))
+  // const autofireCustomRangeTableRollAllDiceResults = autofireTurnsToKill(modifier,customAutofireRangeDVs[range],25)
+  // const helixResults = autofireTurnsToKill(modifier,customAutofireRangeDVs2[range],20,{maxAutoMod:5,guaranteedMultiplier: guarantee ? guarantee : Math.floor((modifier-8)/3),turnsToReload:2})
+  const scyllaResults = basicTurnsToKill(5,modifier,rifleRangeDVs[range],9,3)
+  const kerberosMoreDiceResults = autofireTurnsToKill(modifier+1,kerberosRangeDVs[range],50,{maxAutoMod:5,guaranteedMultiplier: guarantee ? guarantee : Math.floor((modifier-8)/3)})
+  const kerberosD4sResults = autofireTurnsToKill(modifier+1,kerberosRangeDVs[range],50,{maxAutoMod:3,dieSize:4,diceAmount:4,guaranteedMultiplier: guarantee ? guarantee : Math.floor((modifier-8)/3)})
+  // const kerberosGuaranteeResults = autofireTurnsToKill(modifier+1,kerberosRangeDVs[range],50,{maxAutoMod:4,guaranteedMultiplier: guarantee ? guarantee+1 : Math.floor((modifier-8)/3)+1 })
+  // const referenceResults = basicTurnsToKill(4,modifier+2,smgRangeDVs[range],40)
+  // const reference2Results = basicTurnsToKill(3,modifier+2,smgRangeDVs[range],40,2)
+  // const smgResults = autofireTurnsToKill(modifier+2,smgAutofireRangeDVs[range],40,{guaranteedMultiplier: guarantee ? guarantee : Math.floor((modifier-8)/3), maxAutoMod: 3})
+
+  const basicStats = statify(basicResults, 'Turns to Kill', 'Standard Deviation', false)
+  const GeminiStats = statify(GeminiResults, 'Turns to Kill', 'Standard Deviation', false)
+  // const nonexcelKerberosStats = statify(nonexcelKerberosResults, 'Turns to Kill', 'Standard Deviation')
+  // const autofireStats = statify(autofireResults, 'Turns to Kill', 'Standard Deviation')
+  // const autofireExtendedMagStats = statify(autofireExtendedMagResults, 'Turns to Kill', 'Standard Deviation')
+  // const autofireDrumMagStats = statify(autofireDrumMagResults, 'Turns to Kill', 'Standard Deviation')
+  // const autofireAllDiceStats = statify(autofireAllDiceResults, 'Turns to Kill', 'Standard Deviation')
+  // const autofireRegularRangeStats = statify(autofireRegularRangeResults, 'Turns to Kill', 'Standard Deviation')
+  // const autofireBothStats = statify(autofireBothResults, 'Turns to Kill', 'Standard Deviation')
+  // const customAutofireStats = statify(autofireCustomRangeTableResults, 'Turns to Kill', 'Standard Deviation', false)
+  // const customAutofireExtendedMagStats = statify(autofireCustomRangeTableExtendedMagResults, 'Turns to Kill', 'Standard Deviation', false)
+  // const customAutofireDrumMagStats = statify(autofireCustomRangeTableDrumMagResults, 'Turns to Kill', 'Standard Deviation', false)
+  const guaranteeAutofireDrumMagStats = statify(autofireGuaranteeDrumMagResults, 'Turns to Kill', 'Standard Deviation', false)
+  // const customGuaranteeAutofireDrumMagStats = statify(autofireCustomRangeTableGuaranteeDrumMagResults, 'Turns to Kill', 'Standard Deviation', false)
+  // const customGuaranteeAutofireStats = statify(autofireCustomRangeTableGuaranteeResults, 'Turns to Kill', 'Standard Deviation', false)
+  // const helixStats = statify(helixResults, 'Turns to Kill', 'Standard Deviation', false)
+  const scyllaStats = statify(scyllaResults, 'Turns to Kill', 'Standard Deviation', false)
+  const kerberosMoreDiceStats = statify(kerberosMoreDiceResults, 'Turns to Kill', 'Standard Deviation', false)
+  const kerberosD4sStats = statify(kerberosD4sResults, 'Turns to Kill', 'Standard Deviation', false)
+  // const kerberosGuaranteeStats = statify(kerberosGuaranteeResults, 'Turns to Kill', 'Standard Deviation', false)
+  // const referenceStats = statify(referenceResults, 'Turns to Kill', 'Standard Deviation', false)
+  // const reference2Stats = statify(reference2Results, 'Turns to Kill', 'Standard Deviation', false)
+  // const smgStats = statify(smgResults, 'Turns to Kill', 'Standard Deviation', false)
   return {
-    trial: {
-      hp: ENEMY_HP,
-      armor: ENEMY_ARMOR,
-      modifier,
-      range
-    },
-    basic: basicStats,
-    autofire: autofireStats,
-    kerberos: kerberosStats,
-    'Non-Excellent Kerberos': nonexcelKerberosStats,
+    // trial: {
+    //   // hp: ENEMY_HP,
+    //   // armor: ENEMY_ARMOR,
+    //   modifier,
+    //   range
+    // },
+    'Single Shots': basicStats,
+    'Autofire ESD': guaranteeAutofireDrumMagStats,
+    // 'SMG Auto ESD': smgStats,
+    // '4d6 Reference': referenceStats,
+    // '3d6x2 Reference': reference2Stats,
+    'Gemini': GeminiStats,
+    // 'Helix': helixStats,
+    'Scylla': scyllaStats,
+    'Kerberos x5': kerberosMoreDiceStats,
+    'Kerberos 4d4x3': kerberosD4sStats,
+    // 'Kerberos +1': kerberosGuaranteeStats,
+    // 'Non-Excellent Kerberos': nonexcelKerberosStats,
+    // 'Autofire - RAW': autofireStats,
+    // 'Autofire - RAW (Extendo)': autofireExtendedMagStats,
+    // 'Autofire - RAW (Drum)': autofireDrumMagStats,
+    // // 'Autofire - roll all dice': autofireAllDiceStats,
+    // // 'Autofire - regular rifle DVs': autofireRegularRangeStats,
+    // // 'Autofire - roll all dice and regular DVs': autofireBothStats,
+    // 'Autofire - Custom Range Table': customAutofireStats,
+    // 'Autofire - Custom Range Table (Extendo)': customAutofireExtendedMagStats,
+    // 'Autofire - Custom Range Table (Drum)': customAutofireDrumMagStats,
+    // 'Autofire - Guaranteed Mod (Drum)': guaranteeAutofireDrumMagStats,
+    // 'New Autofire ': customGuaranteeAutofireStats,
+    // 'New Autofire (Drum)': customGuaranteeAutofireDrumMagStats,
   }
 }
 
@@ -606,12 +733,61 @@ function kerberosTest(modifier,range) {
 //   },
 // }
 
-// const kerberosData = {
-//   '0-6m': kerberosTest(13,'0-6m'),
-//   '7-12m': kerberosTest(13,'7-12m'),
-//   '13-25m': kerberosTest(13,'13-25m'),
-//   '26-50m': kerberosTest(13,'26-50m'),
+// const bigGunsData = {
+//   '0-6m': kerberosTest(14,'0-6m'),
+//   '7-12m': kerberosTest(14,'7-12m'),
+//   '13-25m': kerberosTest(14,'13-25m'),
+//   '26-50m': kerberosTest(14,'26-50m'),
+//   '51-100m': kerberosTest(14,'51-100m'),
 // }
+
+const autofireData = {
+  '0-6m': {
+    // '12 skill': kerberosTest(12,'0-6m'),
+    'REF 8 +3 Autofire': kerberosTest(11,'0-6m'),
+    // 'REF 8 +4 Autofire': kerberosTest(12,'0-6m'),
+    'REF 8 +5 Autofire': kerberosTest(13,'0-6m'),
+    'REF 8 +6 Autofire': kerberosTest(14,'0-6m'),
+    'REF 8 +7 Autofire': kerberosTest(15,'0-6m'),
+    'REF 8 +9 Autofire': kerberosTest(17,'0-6m'),
+  },
+  '7-12m': {
+    // '12 skill': kerberosTest(12,'7-12m'),
+    'REF 8 +3 Autofire': kerberosTest(11,'7-12m'),
+    // 'REF 8 +4 Autofire': kerberosTest(12,'7-12m'),
+    'REF 8 +5 Autofire': kerberosTest(13,'7-12m'),
+    'REF 8 +6 Autofire': kerberosTest(14,'7-12m'),
+    'REF 8 +7 Autofire': kerberosTest(15,'7-12m'),
+    'REF 8 +9 Autofire': kerberosTest(17,'7-12m'),
+  },
+  '13-25m': {
+    // '12 skill': kerberosTest(12,'13-25m'),
+    'REF 8 +3 Autofire': kerberosTest(11,'13-25m'),
+    // 'REF 8 +4 Autofire': kerberosTest(12,'13-25m'),
+    'REF 8 +5 Autofire': kerberosTest(13,'13-25m'),
+    'REF 8 +6 Autofire': kerberosTest(14,'13-25m'),
+    'REF 8 +7 Autofire': kerberosTest(15,'13-25m'),
+    'REF 8 +9 Autofire': kerberosTest(17,'13-25m'),
+  },
+  '26-50m': {
+    // '12 skill': kerberosTest(12,'26-50m'),
+    'REF 8 +3 Autofire': kerberosTest(11,'26-50m'),
+    // 'REF 8 +4 Autofire': kerberosTest(12,'26-50m'),
+    'REF 8 +5 Autofire': kerberosTest(13,'26-50m'),
+    'REF 8 +6 Autofire': kerberosTest(14,'26-50m'),
+    'REF 8 +7 Autofire': kerberosTest(15,'26-50m'),
+    'REF 8 +9 Autofire': kerberosTest(17,'26-50m'),
+  },
+  '51-100m': {
+    // '12 skill': kerberosTest(12,'51-100m'),
+    'REF 8 +3 Autofire': kerberosTest(11,'51-100m'),
+    // 'REF 8 +4 Autofire': kerberosTest(12,'51-100m'),
+    'REF 8 +5 Autofire': kerberosTest(13,'51-100m'),
+    'REF 8 +6 Autofire': kerberosTest(14,'51-100m'),
+    'REF 8 +7 Autofire': kerberosTest(15,'51-100m'),
+    'REF 8 +9 Autofire': kerberosTest(17,'51-100m'),
+  },
+}
 
 // const headshotData = {
 //   Rifle: {
@@ -623,18 +799,18 @@ function kerberosTest(modifier,range) {
 //   }
 // }
 
-const armorData = {
-  'DV 15': {
-    'Heavy SMG': armorTest(3,14,15),
-    'Very Heavy Pistol': armorTest(4,14,15),
-    'Rifle': armorTest(5,14,15),
-  },
-  'DV 20': {
-    'Heavy SMG': armorTest(3,14,20),
-    'Very Heavy Pistol': armorTest(4,14,20),
-    'Rifle': armorTest(5,14,20),
-  }
-}
+// const armorData = {
+//   'DV 15': {
+//     'Heavy SMG': armorTest(3,14,15),
+//     'Very Heavy Pistol': armorTest(4,14,15),
+//     'Rifle': armorTest(5,14,15),
+//   },
+//   'DV 20': {
+//     'Heavy SMG': armorTest(3,14,20),
+//     'Very Heavy Pistol': armorTest(4,14,20),
+//     'Rifle': armorTest(5,14,20),
+//   }
+// }
 
 const allData = {
   // expandingAmmo: expandingData,
@@ -642,9 +818,10 @@ const allData = {
   // incendaryAmmo: incendaryData,
   // smartAmmo:smartData,
   // homebrewAmmo:homebrewData,
-  // kerberosData,
+  autofireData,
+  // bigGunsData,
   // headshotData
-  armorData
+  // armorData
 }
 
 fs.writeFileSync('results.json',JSON.stringify(allData,undefined,2))
