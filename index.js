@@ -2,8 +2,8 @@ const fs = require('fs')
 const mathjs = require('mathjs')
 
 const NUM_TRAILS = 100000
-const ENEMY_HP = 40
-const ENEMY_ARMOR = 11
+const ENEMY_HP = 60
+const ENEMY_ARMOR = 15
 
 function rollToHit() {
   const firstroll = Math.floor(Math.random()*10)+1
@@ -64,7 +64,7 @@ function armorPiercingTest(dice) {
   }
 }
 
-function statify(data, averageLabel, stddevLabel, stddev = true) {
+function statify(data, averageLabel, stddevLabel, stddev = true, singleLine = false) {
   const average = mathjs.sum(data) / NUM_TRAILS
   const stdDev = mathjs.std(data,'uncorrected')
   const withoutOutliers = data.filter((n)=>{
@@ -80,6 +80,9 @@ function statify(data, averageLabel, stddevLabel, stddev = true) {
   results[stddevLabel] = stdDev
   if (stddev) {
     return results
+  }
+  if(singleLine) {
+    return `${Math.round(adjustedAverage*100)/100} (${Math.round(stdDev*100)/100})`
   }
   return Math.round(adjustedAverage*100)/100
 }
@@ -160,6 +163,7 @@ function basicTurnsToKill(dice, modifier, dv, maxAmmo, rof) {
     let ammo = maxAmmo
     let rollCount = 0
     while( hp > 0 ) {
+      rollCount += 1
       if(ammo < rateOfFire) { ammo = maxAmmo; continue; } 
       for (let s = 0; s < rateOfFire; s++)
       {
@@ -175,7 +179,41 @@ function basicTurnsToKill(dice, modifier, dv, maxAmmo, rof) {
           }
         }
       }
+    }
+    results.push(rollCount)
+  }
+  return results
+}
+
+function zeusTurnsToKill(dice, modifier, dv, {enemyHP = ENEMY_HP, enemyArmor = ENEMY_ARMOR, 
+  capacitorCharges = 3, magSize = 1, armorIgnored = 8, armorDestoryed = 4} = {}) {
+  const rateOfFire = 1
+  // turn to kill
+  const results = []
+  for(let i = 0; i < NUM_TRAILS; i++) { 
+    let armor = enemyArmor
+    let hp = enemyHP
+    let ammo = magSize
+    let cap = capacitorCharges
+    let rollCount = 0
+    while( hp > 0 ) {
       rollCount += 1
+      if(ammo < rateOfFire) { ammo = magSize; continue; } 
+      if(capacitorCharges < rateOfFire) { cap = capacitorCharges; continue; } 
+      for (let s = 0; s < rateOfFire; s++)
+      {
+        ammo -= 1
+        const hitRoll = rollToHit()
+        if ( hitRoll + modifier > dv ) {
+          const {roll: damageRoll,crit} = rollDamage(dice)
+          if (damageRoll > armor - armorIgnored) {
+            hp -= damageRoll - (armor - armorIgnored)
+            armor -= armorDestoryed
+            if (armor < 0) { armor = 0 }
+            if (crit) { hp -= 5 }
+          }
+        }
+      }
     }
     results.push(rollCount)
   }
@@ -549,6 +587,28 @@ kerberosRangeDVs = {
   '51-100m': 21,
 }
 
+function zeusTest(modifier,range,enemyHP,enemyArmor) {
+  const basicResults = basicTurnsToKill(5,modifier+2,rifleRangeDVs[range],25)
+  const GeminiResults = basicTurnsToKill(4,modifier+2,rifleRangeDVs[range],20,2)
+  const autofireGuaranteeDrumMagResults = autofireTurnsToKill(modifier+2,rifleAutofireRangeDVs[range],45,{guaranteedMultiplier: Math.floor((modifier-8)/3)})
+  const scyllaResults = basicTurnsToKill(5,modifier,rifleRangeDVs[range],9,3)
+  const zeusResults = zeusTurnsToKill(6,modifier,rifleRangeDVs[range])
+
+  const basicStats = statify(basicResults, 'Turns to Kill', 'Standard Deviation', false)
+  const geminiStats = statify(GeminiResults, 'Turns to Kill', 'Standard Deviation', false)
+  const autofireStats = statify(autofireGuaranteeDrumMagResults, 'Turns to Kill', 'Standard Deviation', false)
+  const scyllaStats = statify(scyllaResults, 'Turns to Kill', 'Standard Deviation', false)
+  const zeusStats = statify(zeusResults, 'Turns to Kill', 'Standard Deviation', false)
+
+  return {
+    'Single Shots': basicStats,
+    'Autofire ESD': autofireStats,
+    'Gemini': geminiStats,
+    'Scylla':  scyllaStats,
+    'Zeus': zeusStats
+  }
+}
+
 function kerberosTest(modifier,range, guarantee = undefined) {
   const basicResults = basicTurnsToKill(5,modifier+2,rifleRangeDVs[range],25)
   // const autofireResults = autofireTurnsToKill(modifier,autofireRangeDVs[range],25)
@@ -568,15 +628,17 @@ function kerberosTest(modifier,range, guarantee = undefined) {
   // const autofireCustomRangeTableRollAllDiceResults = autofireTurnsToKill(modifier,customAutofireRangeDVs[range],25)
   // const helixResults = autofireTurnsToKill(modifier,customAutofireRangeDVs2[range],20,{maxAutoMod:5,guaranteedMultiplier: guarantee ? guarantee : Math.floor((modifier-8)/3),turnsToReload:2})
   const scyllaResults = basicTurnsToKill(5,modifier,rifleRangeDVs[range],9,3)
-  const kerberosMoreDiceResults = autofireTurnsToKill(modifier+1,kerberosRangeDVs[range],50,{maxAutoMod:5,guaranteedMultiplier: guarantee ? guarantee : Math.floor((modifier-8)/3)})
-  const kerberosD4sResults = autofireTurnsToKill(modifier+1,kerberosRangeDVs[range],50,{maxAutoMod:3,dieSize:4,diceAmount:4,guaranteedMultiplier: guarantee ? guarantee : Math.floor((modifier-8)/3)})
+  // const kerberosMoreDiceResults = autofireTurnsToKill(modifier+1,kerberosRangeDVs[range],50,{maxAutoMod:5,guaranteedMultiplier: guarantee ? guarantee : Math.floor((modifier-8)/3)})
+  // const kerberosD4sResults = autofireTurnsToKill(modifier+1,kerberosRangeDVs[range],50,{maxAutoMod:3,dieSize:4,diceAmount:4,guaranteedMultiplier: guarantee ? guarantee : Math.floor((modifier-8)/3)})
   // const kerberosGuaranteeResults = autofireTurnsToKill(modifier+1,kerberosRangeDVs[range],50,{maxAutoMod:4,guaranteedMultiplier: guarantee ? guarantee+1 : Math.floor((modifier-8)/3)+1 })
   // const referenceResults = basicTurnsToKill(4,modifier+2,smgRangeDVs[range],40)
   // const reference2Results = basicTurnsToKill(3,modifier+2,smgRangeDVs[range],40,2)
   // const smgResults = autofireTurnsToKill(modifier+2,smgAutofireRangeDVs[range],40,{guaranteedMultiplier: guarantee ? guarantee : Math.floor((modifier-8)/3), maxAutoMod: 3})
+  const zeusResults = zeusTurnsToKill(6,modifier,rifleRangeDVs[range])
+  const zeusTeamResults = zeusTurnsToKill(6,modifier,rifleRangeDVs[range], {magSize:99})
 
-  const basicStats = statify(basicResults, 'Turns to Kill', 'Standard Deviation', false)
-  const GeminiStats = statify(GeminiResults, 'Turns to Kill', 'Standard Deviation', false)
+  const basicStats = statify(basicResults, 'Turns to Kill', 'Standard Deviation', false, true)
+  const GeminiStats = statify(GeminiResults, 'Turns to Kill', 'Standard Deviation', false, true)
   // const nonexcelKerberosStats = statify(nonexcelKerberosResults, 'Turns to Kill', 'Standard Deviation')
   // const autofireStats = statify(autofireResults, 'Turns to Kill', 'Standard Deviation')
   // const autofireExtendedMagStats = statify(autofireExtendedMagResults, 'Turns to Kill', 'Standard Deviation')
@@ -587,17 +649,20 @@ function kerberosTest(modifier,range, guarantee = undefined) {
   // const customAutofireStats = statify(autofireCustomRangeTableResults, 'Turns to Kill', 'Standard Deviation', false)
   // const customAutofireExtendedMagStats = statify(autofireCustomRangeTableExtendedMagResults, 'Turns to Kill', 'Standard Deviation', false)
   // const customAutofireDrumMagStats = statify(autofireCustomRangeTableDrumMagResults, 'Turns to Kill', 'Standard Deviation', false)
-  const guaranteeAutofireDrumMagStats = statify(autofireGuaranteeDrumMagResults, 'Turns to Kill', 'Standard Deviation', false)
+  const guaranteeAutofireDrumMagStats = statify(autofireGuaranteeDrumMagResults, 'Turns to Kill', 'Standard Deviation', false, true)
   // const customGuaranteeAutofireDrumMagStats = statify(autofireCustomRangeTableGuaranteeDrumMagResults, 'Turns to Kill', 'Standard Deviation', false)
   // const customGuaranteeAutofireStats = statify(autofireCustomRangeTableGuaranteeResults, 'Turns to Kill', 'Standard Deviation', false)
   // const helixStats = statify(helixResults, 'Turns to Kill', 'Standard Deviation', false)
-  const scyllaStats = statify(scyllaResults, 'Turns to Kill', 'Standard Deviation', false)
-  const kerberosMoreDiceStats = statify(kerberosMoreDiceResults, 'Turns to Kill', 'Standard Deviation', false)
-  const kerberosD4sStats = statify(kerberosD4sResults, 'Turns to Kill', 'Standard Deviation', false)
+  const scyllaStats = statify(scyllaResults, 'Turns to Kill', 'Standard Deviation', false, true)
+  // const kerberosMoreDiceStats = statify(kerberosMoreDiceResults, 'Turns to Kill', 'Standard Deviation', false)
+  // const kerberosD4sStats = statify(kerberosD4sResults, 'Turns to Kill', 'Standard Deviation', false)
   // const kerberosGuaranteeStats = statify(kerberosGuaranteeResults, 'Turns to Kill', 'Standard Deviation', false)
   // const referenceStats = statify(referenceResults, 'Turns to Kill', 'Standard Deviation', false)
   // const reference2Stats = statify(reference2Results, 'Turns to Kill', 'Standard Deviation', false)
   // const smgStats = statify(smgResults, 'Turns to Kill', 'Standard Deviation', false)
+  const zeusStats = statify(zeusResults, 'Turns to Kill', 'Standard Deviation', false, true)
+  const zeusTeamStats = statify(zeusTeamResults, 'Turns to Kill', 'Standard Deviation', false, true)
+
   return {
     // trial: {
     //   // hp: ENEMY_HP,
@@ -613,8 +678,10 @@ function kerberosTest(modifier,range, guarantee = undefined) {
     'Gemini': GeminiStats,
     // 'Helix': helixStats,
     'Scylla': scyllaStats,
-    'Kerberos x5': kerberosMoreDiceStats,
-    'Kerberos 4d4x3': kerberosD4sStats,
+    'Zeus': zeusStats,
+    'Zeus (Team)': zeusTeamStats,
+    // 'Kerberos x5': kerberosMoreDiceStats,
+    // 'Kerberos 4d4x3': kerberosD4sStats,
     // 'Kerberos +1': kerberosGuaranteeStats,
     // 'Non-Excellent Kerberos': nonexcelKerberosStats,
     // 'Autofire - RAW': autofireStats,
